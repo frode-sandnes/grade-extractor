@@ -1,0 +1,152 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta http-equiv="X-UA-Compatible" content="IE=edge">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Grade extractor</title>
+
+    <style>
+
+        /* By Frode Eika Sandnes, Oslo Metropolitan University, December, 2022.*/
+        body
+            {
+            color:lightgrey;
+            background-color:black;
+            font-family:sans-serif;
+            }
+
+    </style>
+
+    <script src="docToText.js"></script>
+    <script type="text/javascript" src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.8.0/jszip.js"></script>
+    <script type="text/javascript" src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.8.0/xlsx.js"></script>
+    <script type="text/javascript" src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.13.1/xlsx.full.min.js"></script>  
+
+</head>
+<body>
+    <script>
+
+// Bootstrapping
+window.addEventListener('DOMContentLoaded', (event) => setup());
+function setup()
+    {
+    // Add file load handler
+    const fileSelector = document.getElementById("file-selector");
+	fileSelector.addEventListener('change', (event) => loadFiles(event));        
+    }
+// retrieving file contents of wordprocessor document
+function loadFiles(event)
+    {
+    const files = event.target.files;
+
+    for (var i = 0, file; file = files[i]; i++) 
+        {		
+        const {name} = file;
+        const ext = name.toLowerCase().substring(name.lastIndexOf('.') + 1);
+        const docToText = new DocToText();
+        // single file extract to text
+        docToText.extractToText(file, ext)
+            .then(text => process(text, name.substring(0, name.length - ext.length -1)))
+            .catch(error => console.log(error));		
+        }
+    }
+// GLobals
+let groupCounter = 0;
+const maxGroupSize = 4;
+
+function process(text, inputFilename)
+    {
+    groupCounter = 0;   // reset in case it is called multiple times
+    let cleanedText = text.replaceAll("," ,"");     // remove the commas introduced by the library
+    cleanedText = cleanedText.replaceAll("\n\n", "\n");     // reduce doubple newline chars to single newline characters introduced by the library
+    let projects = cleanedText.split("Project#").splice(1);  // remove head before first project
+    let sheet = projects.flatMap(project => [ ...getGrades(project) ]); 
+    // save the result to new sheet
+    var filename = inputFilename + '-extracted-grades.xlsx';
+	var ws = XLSX.utils.json_to_sheet(sheet);
+    var wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, "Extracted-grades");
+    XLSX.writeFile(wb,filename);
+    report("Grades extracted for " + sheet.length + " records to file " + filename + ".");
+    }
+
+// The format of each project is
+// 1 project number
+// 2 name
+// .... more names .... up to maxGroupSize
+// 3 learing outcome/criteria
+// 4 grade
+// like 3 and 4 criteria-grade pairs until blank line
+function getGrades(project)
+    {
+    let lines = project.split("\n");
+    // start at index 1 since line 0 is project no. - extract list of students
+    let gradeIdx = 2;
+    let students = [];
+    for (let i = 1; i < lines.length; i++)
+        {
+        const line = lines[i];
+        if (line.includes("K-") || line.includes("S-") || line.includes("GK-") || line === "")
+            {
+            gradeIdx = i;   // we have got to the grade section, no more students
+            groupCounter++;
+            break;    
+            }  
+        students = [...students, line.split("_")[0]]; // collect student name  
+        }
+    // consistency check
+    if (students.length == 0)
+        {
+        report("CONSISTENCY CHECK: missing studets for group " + groupCounter);
+        students = ["missing student name, group "+ groupCounter];
+        }
+    if (students.length > maxGroupSize)
+        {
+        report("CONSISTENCY CHECK: too many studets in group " + groupCounter + ", " + students.length + " students with max of " + maxGroupSize);
+        }
+    let result = {};    // object with result
+    for (let i = gradeIdx; i < lines.length; i += 2)
+        {
+        if (lines[i] === "")    // We have reached the end of grades section
+            {
+            break;    
+            }
+        if (!lines[i].includes("-"))
+            {
+            report("CONSISTENCY CHECK: grade format problen for " + student);
+            }
+        result = {...result, [lines[i]]: lines[i + 1]}
+        }
+    if ([...Object.keys(result)].length == 0)
+        {
+        report("CONSISTENCY CHECK: missing grades for group " + groupCounter);
+        }
+    let groupList = students.map(student => ({name: student, group: groupCounter, ...result}));
+    return groupList;
+    }
+
+function report(str)
+    {
+    document.getElementById("report").innerText += str + "\n\n";
+    }
+
+    </script>    
+</body>
+    <h1>Grade extractor</h1>
+    <p>Upload wordprocessor document with grade info based on the automatically generated template.</p>
+    <p>Extracted grades will be saved to spreadsheet name, group id (in case of multiple students per gradeset), and set of grades.  One student per row.</p>    
+    <form id="configuration">
+        <h2>Add files to link</h2>
+        <ul>
+            <li>
+                <label for="file-selector"><span>File 1</span></label>
+                <input type="file" id="file-selector" accept=".docx, .doc, .txt" >
+            </li>
+        </ul>				
+    </form>		
+
+    <h2>Status report:</h2>                    
+    <p id="report" style="color: yellow;"></p>
+
+</html>
